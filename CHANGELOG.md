@@ -4,6 +4,65 @@ Shipped slices of LiftScope, newest first. For current invariants and file map, 
 
 ## Unreleased
 
+### Stack detection: a CMS named in page copy is no longer a detection
+
+Reported against `aeminsider.com`, which came back as **high-confidence Adobe Experience Manager**. It is hand-written static HTML on Netlify — no CMS at all. Two causes, compounding:
+
+1. One AEM rule matched the literal phrase *"adobe experience manager"* anywhere in the document. The site's hero reads "Learn Adobe Experience Manager from the ground up", so it matched 10 times per page. Its evidence label already said "generator copy" — the rule was meant to match a `<meta name="generator">` tag and had lost that scoping. Every structural AEM marker (`/etc.clientlibs`, `/content/dam`, Granite, `aem-Grid`) was absent.
+2. Confidence summed per-page scores, and `pages >= 3` alone meant `high`. So a weak rule matching a site-wide headline across 12 sampled pages scored 60 and was reported as certain.
+
+Because `stackIsActionable()` is true for medium/high CMS hits, this was not cosmetic: it added the `+0.5` mismatch driver and injected the `stack-mismatch` risk, inflating the estimate.
+
+Fixes:
+
+- Generator rules now match an actual `<meta name="generator">` tag via a shared `GENERATOR_RE` helper, accepting either attribute order. The bare phrase no longer counts.
+- **Confidence now comes from the strongest evidence on a single page**, not the running total. Breadth still corroborates — `high` needs strong evidence on at least two pages — but repetition can no longer promote weak evidence on its own.
+
+`aeminsider.com` now reports no fingerprint, the stack driver contributes 0 points, and the `stack-mismatch` risk is absent. Real detections are unaffected: AEM, WordPress and Drupal sites with structural markers still reach `high`.
+
+A deliberate consequence: weakly-signalled sites are now **under**-called. `adobe.com`'s homepage exposes only `/content/dam`, so it displays as AEM at *low* confidence and does not move the score. Detection is worth ±0.5 of a ~12.7-point scale — its job is credibility, and a confidently wrong answer costs far more than an honest "not identified".
+
+Regression: `npm run test:stack` gains the aeminsider copy case, both generator attribute orders, a generator tag for a different platform alongside AEM prose, and the confidence-amplification case (weight-4 rule on 12 pages must stay `low`).
+
+### First report is free and complete; price set to ₹1,499
+
+The gate hid the remaining risks, the phased plan, and the client memo — which is precisely the evidence that the output is worth money. Nobody pays a stranger to find out whether a risk register is boilerplate.
+
+**Every visitor now unlocks one report in full, with no card and no account.** From the second report on, unlocking is a paid upgrade. The two-risk teaser still applies to those later reports.
+
+Entitlement (`lib/entitlements.ts`) is keyed against **every identity the caller presents** — a signed, httpOnly `liftscope_visitor` cookie and, when signed in, the account — and all of them are checked. Keying on one alone would let someone farm free reports by claiming anonymously and then signing up, or by clearing cookies while signed in. Verified live: both routes return `pay`, and a direct `claim-free` call returns 409.
+
+Clearing cookies in a private window still yields another free report. That is an accepted trade for not demanding a signup before anyone has seen the product, and is documented rather than patched by adding friction.
+
+The gate now reports four states — `open`, `free`, `login`, `pay` — and the unlock route mints the visitor cookie on first contact so an anonymous first-timer has somewhere to hold a claim.
+
+**Price set to ₹1,499** (`RAZORPAY_UNIT_AMOUNT=149900`), down from the ₹3,999 placeholder. ₹1,499 is about an hour of an Indian pre-sales solution architect's loaded cost, and stays below the point where an individual needs a PO rather than their own card. Quote it as "+ GST" — a GST-registered buyer claims input credit, so the tax is a wash for them.
+
+Regression: `npm run test:entitlements` (26 fixtures), covering cookie forgery and tampering, one-claim-per-visitor, survival across a cold start, both identity-switching farm routes, and idempotent re-claims.
+
+### Payments moved to Razorpay (India-first, INR)
+
+Stripe is **invite-only for Indian businesses** and has been for years — you cannot self-serve an account. Since the billing entity is Indian, Razorpay is the practical option, and it also brings UPI (1% + ₹3, versus card rates) and automatic FIRA/eFIRC generation if international collection is switched on later.
+
+Fees were not the reason: on a ₹-equivalent of a $49 sale, Razorpay international (3% + ₹3 + 18% GST on the fee) and Stripe US (2.9% + 30¢) land within about five cents of each other. Availability was the deciding factor.
+
+The integration uses **Payment Links**, not Checkout.js: the link flow is a redirect, which preserves the shape the unlock panel already had and keeps a third-party script out of the app. `RAZORPAY_UNIT_AMOUNT` is in **paise** (`299900` = ₹2,999).
+
+Verification is deliberately two-layered, because either half alone is exploitable:
+
+1. The callback signature (`payment_link_id|payment_link_reference_id|payment_link_status|payment_id`, HMAC-SHA256 with the key secret) proves Razorpay produced the query string.
+2. The server then **re-fetches the payment link from Razorpay** and reads `notes.reportId`, `notes.userId`, and the paid status from that record.
+
+Step 2 is not redundant. A signature proves the parameters were not tampered with; it says nothing about *which report* the payment was for, and `notes` is not part of the signed payload at all. Verified live: a request with a valid signature still returned 502 rather than unlocking, because the authoritative fetch had to succeed first.
+
+`payment_link.paid` webhooks backstop a buyer who pays and closes the tab. Webhooks are signed with `RAZORPAY_WEBHOOK_SECRET` over the raw body — a **different** secret from the key secret, and the fixtures assert that one does not verify the other.
+
+`AccountUnlock.source` is now a shared `UnlockSource` type (`razorpay | demo | free`). The account page renders unknown sources by label lookup so a historical `stripe` row imported from an older store still displays sensibly rather than being mislabelled.
+
+Removed: `lib/stripe.ts`, `app/api/stripe/*`, and the `stripe` dependency.
+
+Regression: `npm run test:razorpay` (36 fixtures, no network). The concatenation order is asserted against an independently computed HMAC rather than against our own implementation, so a reordered payload fails in the suite instead of in production. It also covers the specific attack of relabelling an unpaid link as `paid`, partial payments, and key/webhook secret confusion.
+
 ### Durable storage — paid unlocks survive
 
 Reports lived in a per-process `Map`; accounts and paid unlocks lived in `data/accounts.json`, which on Vercel is under `/tmp`. Both vanish on a cold start or a second instance, so a user could pay through Stripe and land on *"Report is not in server memory"* — with no record on the account that they had bought anything.

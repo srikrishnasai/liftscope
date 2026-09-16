@@ -21,25 +21,32 @@ Stack: Next.js 16 App Router (TypeScript), Tailwind 4, shadcn/ui. Dev: `npm run 
 
 1. **The rubric owns the number.** Scoring is deterministic in `lib/scoring.ts`. Never call an LLM (or Hugging Face) to produce complexity, effort, or risks.
 2. **AI is rewrite-only.** Optional memo polish (`lib/ai-memo.ts`) may rephrase prose. Drafts that drop or change rubric numbers are discarded (`memoKeepsNumbers`).
-3. **Stack detection must not invent metrics.** Fingerprints live in `lib/detect-stack.ts`. A mismatch driver (+0.5) and the `stack-mismatch` risk apply only when `stackIsActionable()` is true: confidence **medium or high** and the hit is a **CMS**, not Next.js/Nuxt. Loose brand-name / LCP / CSS `:focus` matches were already a production bug — do not reintroduce them. `npm run test:stack` is the regression check.
+3. **Stack detection must not invent metrics.** Fingerprints live in `lib/detect-stack.ts`. A mismatch driver (+0.5) and the `stack-mismatch` risk apply only when `stackIsActionable()` is true: confidence **medium or high** and the hit is a **CMS**, not Next.js/Nuxt. Loose brand-name / LCP / CSS `:focus` matches were already a production bug — do not reintroduce them. Two rules follow from that and are load-bearing:
+   - **A platform's name in page copy is not evidence of the platform.** Match a `<meta name="generator">` tag (`GENERATOR_RE`), never the bare phrase. Sites about a CMS, agency pages listing platforms, and comparison posts all name them on every page.
+   - **Confidence comes from the strongest evidence on a single page, not the sum across pages.** Breadth corroborates; it must never promote weak evidence on its own.
+
+   `npm run test:stack` is the regression check. Detection is worth ±0.5 of ~12.7 — its real job is credibility, so a wrong answer costs far more than "not identified". Prefer precision and be willing to say unknown.
 4. **No second component library.** Use existing shadcn/ui primitives.
 5. **All persistence goes through `lib/kv.ts`.** Upstash Redis when `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` are set, otherwise a local JSON file under `data/`. Never reintroduce a module-level `Map` or a bespoke file for state that must outlive a request — that is what lost paid unlocks. Adding a *second* datastore still needs an explicit ask. `npm run test:store` is the regression check.
-6. **Freemium gate:** score, bands, overrides, tighten-the-band, and **two** risks are public. Remaining risks, plan, memo, sampled pages, print — behind unlock.
-7. **Paid path:** live report + `STRIPE_SECRET_KEY` → **sign in first**, then Stripe Checkout (~$49, `STRIPE_UNIT_AMOUNT=4900`). Sample fixture (`input.demo`) and instances without Stripe keys stay free to unlock.
+6. **Freemium gate:** score, bands, overrides, tighten-the-band, and **two** risks are public on every report. **The first report per visitor unlocks in full, free, with no account** — hiding the plan and memo hid the evidence the output is any good. From the second report on, unlocking is paid. Entitlement lives in `lib/entitlements.ts`; `npm run test:entitlements` is the regression check.
+7. **Paid path:** live report + Razorpay keys → **sign in first**, then a Razorpay Payment Link (redirect, `RAZORPAY_UNIT_AMOUNT` in **paise**). Sample fixture (`input.demo`) and instances without Razorpay keys stay free to unlock. India-first: INR, UPI/cards/netbanking on Razorpay's hosted page.
 8. **Ads are placeholders only** (`data-ad-slot=left|right|mobile`). Hide on print. No ad network is wired.
 9. **Keep `userHasUnlock` exported** from `lib/accounts.ts`. Unlock APIs import it; dropping it breaks `/account` and paid reports.
 10. **All outbound fetches go through `safeFetch`** (`lib/net-guard.ts`). Never call bare `fetch()` on a caller-supplied URL, and never set `redirect: "follow"` on one — every hop is re-validated because a 302 to `169.254.169.254` is otherwise a live SSRF. `npm run test:net` is the regression check.
 11. **Public endpoints are rate limited** (`lib/rate-limit.ts`). New routes that crawl, hash a password, or spend model tokens take a bucket before doing the work.
 12. **A sitemap index lists sitemaps, not pages.** Its `<loc>` values must never become `urlCount` or reach the page sample. An index we cannot resolve reports `urlCount: 0` (unknown → scored as ~200) plus `indexUnresolved`, never a page count. `npm run test:sitemap` is the regression check.
 13. **Count and sample are separate.** `sitemap.urlCount` is the true inventory; `urls` is capped at `MAX_URLS` for sampling only. Never report `urls.length` as the inventory.
-14. **Format numbers with `formatCount`** (`lib/format.ts`), never bare `toLocaleString()` — that follows the *server's* locale, so an en-IN host renders `8,75,000` and client/server can disagree during hydration.
+14. **Format numbers with `formatCount`** (`lib/format.ts`), never bare `toLocaleString()` — that follows the *server's* locale, so an en-IN host renders `8,75,000` and client/server can disagree during hydration. The one deliberate exception is `formatUnlockPrice` in `lib/razorpay.ts`, which pins **en-IN** because INR is conventionally grouped that way (₹1,20,000). Do not "fix" it to en-US.
+15. **Razorpay uses two different secrets.** `RAZORPAY_KEY_SECRET` signs API auth and the payment **callback**; `RAZORPAY_WEBHOOK_SECRET` signs the **webhook body**. They are not interchangeable and `test:razorpay` asserts that one does not verify the other.
+16. **A valid signature never unlocks a report on its own.** The callback route re-fetches the payment link from Razorpay and reads `notes.reportId` / `notes.userId` and the paid status from *that*. The signature proves the query string was not tampered with; it says nothing about who the payment was for, and `notes` is not part of the signed payload. `npm run test:razorpay` is the regression check.
+17. **The free claim is keyed by every identity the caller presents** — the signed `liftscope_visitor` cookie *and* the account when signed in — and all of them are checked. Keying on only one lets someone farm free reports by signing up after claiming anonymously, or by clearing cookies while signed in. Someone can still get another by clearing cookies in a private window; that is accepted leakage on a top-of-funnel giveaway, not a bug to "fix" by demanding signup.
 
 ## Product loop
 
 1. `POST /api/analyze` parses sitemap (or treats HTML homepage as a page sample), fetches ≤12 pages (8s timeout, concurrency 3, UA `LiftScope/1.0`), classifies templates/integrations/stack, scores, stores report in memory.
 2. Client saves a copy in `localStorage` and opens `/report/[id]`.
 3. Overrides and tighten answers re-run `assembleReport` in the browser — no re-crawl.
-4. Unlock: free if no Stripe / demo fixture; else login then Checkout. Paid unlocks recorded per `userId` through `lib/accounts.ts`.
+4. Unlock: free if no Razorpay keys / demo fixture; else the **first report is free** (one per visitor, claimed via `POST /api/reports/[id]/claim-free`), then login and a Payment Link redirect. On return the callback is verified and the link re-fetched; a webhook backstops a closed tab. Paid unlocks recorded per `userId` through `lib/accounts.ts`.
 
 ## Where to edit
 
@@ -69,7 +76,10 @@ Stack: Next.js 16 App Router (TypeScript), Tailwind 4, shadcn/ui. Dev: `npm run 
 | Reports + unlock flags | `lib/store.ts` |
 | Users + paid unlocks | `lib/accounts.ts` |
 | Storage fixtures | `lib/store-fixtures.ts` (`npm run test:store`) |
-| Stripe | `lib/stripe.ts`, `app/api/stripe/*` |
+| Free-report entitlement | `lib/entitlements.ts`, `app/api/reports/[id]/claim-free` |
+| Entitlement fixtures | `lib/entitlement-fixtures.ts` (`npm run test:entitlements`) |
+| Payments | `lib/razorpay.ts`, `app/api/razorpay/*` |
+| Payment fixtures | `lib/razorpay-fixtures.ts` (`npm run test:razorpay`) |
 | Report UI | `components/report-view.tsx`, `unlock-panel.tsx` |
 | Estimate form | `components/estimate-form.tsx` |
 | Profile | `app/account/page.tsx`, `components/account-settings.tsx` |
@@ -97,7 +107,9 @@ Copy `.env.example`. All optional locally:
 
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — **required in production.** Without both, storage falls back to a local file, which on Vercel is `/tmp` and is lost on every recycle.
 - `AUTH_SECRET` — required in production; local fallback exists
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID`, `STRIPE_UNIT_AMOUNT`, `STRIPE_CURRENCY`
+- `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` — enable payments
+- `RAZORPAY_WEBHOOK_SECRET` — a **different** secret; see invariant 15
+- `RAZORPAY_UNIT_AMOUNT` (paise), `RAZORPAY_CURRENCY`
 - `HF_TOKEN` / `HF_MODEL` (preferred memo polish) or `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL`
 
 Never block scoring on missing keys.
@@ -109,6 +121,8 @@ npm run test:stack   # fingerprint false-positive fixtures
 npm run test:net     # SSRF guard, body caps, rate limiter
 npm run test:sitemap # index vs urlset, counts, extrapolation
 npm run test:store   # durability across cold starts, legacy migration
+npm run test:razorpay # payment + webhook signature verification
+npm run test:entitlements # one free report per visitor, anti-farming
 npm run build        # typecheck + Next production build
 npm run lint
 ```
@@ -124,8 +138,10 @@ That runner does **not** do extensionless resolution, so anything a fixture impo
 - Sitemap gzip: check magic bytes; do not double-decode.
 - Demo fixture score must not always max at 10; retune drivers, do not cap arbitrarily in the UI.
 - Fingerprint false positives: Airbnb `LargestContentfulPaint` ≠ Contentful; `cq:` in CSS `:focus` ≠ AEM; Salesforce `og:image` `/wp-content` ≠ WordPress; HubSpot/Webflow brand copy in marketing HTML ≠ those CMS.
+- `aeminsider.com` (user-reported) was returned as **high-confidence AEM**. It is hand-written static HTML on Netlify; the hero reads "Learn Adobe Experience Manager from the ground up". Two compounding causes, both fixed: a rule matching the bare phrase anywhere in the document, and a confidence model that summed per-page scores so one weak rule on 12 sampled pages reached `high`. Beware `btn--ghost` too — a CSS class, not Ghost CMS.
+- Real sites can be **under**-called now, deliberately. `adobe.com`'s homepage exposes only `/content/dam` (weight 4), so it reports AEM at *low* confidence and does not move the score. That is the intended trade; the lever for more recall is sampling more pages (supply a sitemap, not a homepage), not loosening the rules.
 - Inserting `stack-mismatch` in `lib/risks.ts` must not drop the `cloud-constraints` risk.
-- `app/api/stripe/checkout` must not mark the report unlocked before payment.
+- `app/api/razorpay/checkout` must not mark the report unlocked before payment. Creating a Payment Link is not a payment.
 - `create-next-app` cannot target `/workspace` directly (parent-writable false positive). Scaffold into a subdir if you ever re-init.
 - Page fetches **truncate** at the byte cap; sitemap fetches **error**. A truncated XML document cannot be parsed, but classification only reads the head of an HTML page — erroring on large pages silently dropped real sites (gov.uk lost 11 of 12 samples). `onOverflow` in `safeFetch` picks the mode.
 - Do not pipe `npm run dev` into `head`/`tail` when driving the app. The pipe closes, the dev server wedges on its next write, and every route hangs — it looks like an app bug.
@@ -145,7 +161,7 @@ That runner does **not** do extensionless resolution, so anything a fixture impo
 
 ## What is intentionally unfinished
 
-- Paywall is UI + Stripe session verify; full report JSON is still sent to the client so overrides can run.
+- Paywall is UI + server-side payment verification; full report JSON is still sent to the client so overrides can run.
 - No CRX/package scan, no real ad tags, no always-on deep crawl.
 
 ## When adding a feature

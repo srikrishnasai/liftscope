@@ -3,6 +3,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import { createUserId, normalizeEmail } from "./auth.ts";
 import { dataDir, kv } from "./kv.ts";
+import type { UnlockSource } from "./types.ts";
 
 /**
  * Accounts and paid unlocks.
@@ -30,7 +31,7 @@ export interface Account {
 export interface AccountUnlock {
   userId: string;
   reportId: string;
-  source: "stripe" | "demo";
+  source: UnlockSource;
   at: string;
 }
 
@@ -178,7 +179,7 @@ export function publicAccount(account: Account) {
 export async function recordUnlock(
   userId: string,
   reportId: string,
-  source: "stripe" | "demo" = "stripe",
+  source: UnlockSource = "razorpay",
 ): Promise<void> {
   const existing = await kv().get<AccountUnlock>(unlockKey(userId, reportId));
   if (existing) return;

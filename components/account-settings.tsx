@@ -25,9 +25,22 @@ interface ProfileUser {
   createdAt: string;
 }
 
+/**
+ * Labels for unlock sources. A legacy row imported from an older build can
+ * carry "stripe", so unknown values fall through to the raw string rather
+ * than being mislabelled.
+ */
+const UNLOCK_SOURCE_LABELS: Record<string, string> = {
+  razorpay: "Razorpay",
+  stripe: "Stripe",
+  demo: "demo",
+  free: "free",
+};
+
 interface UnlockRow {
   reportId: string;
-  source: "stripe" | "demo";
+  /** Left wide: historical rows may carry a source this build no longer issues. */
+  source: string;
   at: string;
   available: boolean;
   target: string | null;
@@ -208,7 +221,7 @@ export function AccountSettings({ initialUser }: { initialUser: ProfileUser }) {
         <CardHeader>
           <CardTitle>Email</CardTitle>
           <CardDescription>
-            This is the address used to sign in and for Stripe Checkout.
+            This is the address used to sign in and for payment receipts.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -300,7 +313,7 @@ export function AccountSettings({ initialUser }: { initialUser: ProfileUser }) {
                   <p className="font-medium">
                     {row.target ?? "LiftScope report"}{" "}
                     <span className="font-normal text-muted-foreground">
-                      · {row.source === "stripe" ? "Stripe" : "demo"}
+                      · {UNLOCK_SOURCE_LABELS[row.source] ?? row.source}
                     </span>
                   </p>
                   <p className="text-xs text-muted-foreground">

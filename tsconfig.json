@@ -38,6 +38,8 @@
     "lib/detect-stack-fixtures.ts",
     "lib/net-guard-fixtures.ts",
     "lib/sitemap-fixtures.ts",
-    "lib/store-fixtures.ts"
+    "lib/store-fixtures.ts",
+    "lib/razorpay-fixtures.ts",
+    "lib/entitlement-fixtures.ts"
   ]
 }

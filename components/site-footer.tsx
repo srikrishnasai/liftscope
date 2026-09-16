@@ -8,7 +8,7 @@ export function SiteFooter() {
         <Logo className="text-foreground" markClassName="size-5" />
         <p className="max-w-xl leading-relaxed">
           Planning bands from a published rubric — not a bid. Paid unlocks
-          require an account, then Stripe Checkout when keys are set.
+          require an account, then Razorpay when keys are set.
         </p>
         <Link href="/estimate" className="hover:text-foreground">
           New estimate

@@ -21,6 +21,19 @@ function sign(value: string): string {
   return createHmac("sha256", authSecret()).update(value).digest("base64url");
 }
 
+/** Sign an arbitrary value with the app secret (see `lib/entitlements.ts`). */
+export function signValue(value: string): string {
+  return sign(value);
+}
+
+/** Constant-time check of a value produced by `signValue`. */
+export function verifySignedValue(value: string, signature: string): boolean {
+  const expected = sign(value);
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function createUserId(): string {
   return `usr_${randomBytes(9).toString("hex")}`;
 }

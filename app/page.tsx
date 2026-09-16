@@ -27,7 +27,7 @@ const STEPS = [
   {
     n: "05",
     title: "Unlock the working papers",
-    body: "Risk register, phased plan, a client memo, and what would move the band. Sign in, then Stripe Checkout, when payments are on.",
+    body: "Risk register, phased plan, a client memo, and what would move the band. Sign in, then pay by UPI or card, when payments are on.",
   },
 ];
 
@@ -121,7 +121,7 @@ export default function HomePage() {
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-muted-foreground">Free teaser</dt>
-                  <dd className="text-right">Score + two risks · Stripe</dd>
+                  <dd className="text-right">Score + two risks · UPI/card</dd>
                 </div>
               </dl>
             </aside>

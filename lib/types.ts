@@ -35,6 +35,9 @@ export type IntegrationSignal = (typeof INTEGRATION_SIGNALS)[number];
 
 export type SitemapSource = "url" | "upload" | "demo" | "none";
 
+/** How a report unlock was granted. "demo"/"free" need no payment. */
+export type UnlockSource = "razorpay" | "demo" | "free";
+
 export type FetchStatus = "ok" | "failed" | "skipped" | "fixture";
 
 export const CMS_STACK_IDS = [

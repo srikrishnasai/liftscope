@@ -141,14 +141,14 @@ async function unlockCases(): Promise<void> {
   }
 
   check("no unlock yet", await accounts.userHasUnlock(user.id, "ls-paid"), false);
-  await accounts.recordUnlock(user.id, "ls-paid", "stripe");
+  await accounts.recordUnlock(user.id, "ls-paid", "razorpay");
   check("unlock recorded", await accounts.userHasUnlock(user.id, "ls-paid"), true);
 
   coldStart();
   check("PAID UNLOCK SURVIVES COLD START", await accounts.userHasUnlock(user.id, "ls-paid"), true);
 
   // Recording twice must not duplicate the row.
-  await accounts.recordUnlock(user.id, "ls-paid", "stripe");
+  await accounts.recordUnlock(user.id, "ls-paid", "razorpay");
   check("recording twice is idempotent", (await accounts.listUnlocksForUser(user.id)).length, 1);
 
   await accounts.recordUnlock(user.id, "ls-second", "demo");

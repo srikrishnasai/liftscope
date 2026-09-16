@@ -27,7 +27,7 @@ export default async function LoginPage({
         </p>
         <h1 className="font-heading mt-2 text-3xl tracking-tight">Sign in</h1>
         <p className="mt-3 mb-8 text-sm text-muted-foreground">
-          Required before Stripe Checkout. Estimates and the free teaser stay
+          Required before payment. Estimates and the free teaser stay
           open without an account.
         </p>
         <AuthForm mode="login" nextPath={nextPath} />

@@ -88,4 +88,83 @@ assert(stackAlignment("wordpress", "aemaacs-upgrade") === "mismatch", "wordpress
 assert(stackAlignment("nextjs", "aemaacs-upgrade") === "unknown", "nextjs is not a CMS for alignment");
 assert(isFrontendStack("nextjs"), "nextjs is frontend");
 
+/* ---- brand name in copy is not the platform (aeminsider.com, reported) ---- */
+
+// A tutorial site whose hero reads "Learn Adobe Experience Manager from the
+// ground up". It is hand-written static HTML on Netlify — no CMS at all — but
+// the old prose rule matched the headline on every page and reported
+// high-confidence AEM, which then fed the mismatch driver into the score.
+const aemBrandCopy = detectStackOnPage(
+  "https://aeminsider.com/",
+  `<h1 id="hero-headline">Learn <em>Adobe Experience Manager</em> from the ground up.</h1>
+   <p>AEM tutorials, adobe experience manager guides, and AEM interview prep.</p>
+   <a class="btn btn--ghost" href="/blog">View all episodes</a>`,
+);
+assert(
+  aemBrandCopy.length === 0,
+  `AEM named in body copy must not be a detection: ${JSON.stringify(aemBrandCopy)}`,
+);
+
+// The same words inside a real generator tag *are* evidence, both attr orders.
+const aemGenerator = detectStackOnPage(
+  "https://www.example.com/",
+  `<meta name="generator" content="Adobe Experience Manager">`,
+);
+assert(aemGenerator[0]?.id === "aem", `generator=AEM should detect: ${JSON.stringify(aemGenerator)}`);
+
+const aemGeneratorReversed = detectStackOnPage(
+  "https://www.example.com/",
+  `<meta content="Adobe Experience Manager 6.5" name="generator">`,
+);
+assert(
+  aemGeneratorReversed[0]?.id === "aem",
+  `generator tag with reversed attributes should detect: ${JSON.stringify(aemGeneratorReversed)}`,
+);
+
+// A generator tag for something else must not become AEM.
+const otherGenerator = detectStackOnPage(
+  "https://www.example.com/",
+  `<meta name="generator" content="Hugo 0.120"><p>We migrate sites to Adobe Experience Manager.</p>`,
+);
+assert(
+  !otherGenerator.some((hit) => hit.id === "aem"),
+  `agency copy about AEM must not be AEM: ${JSON.stringify(otherGenerator)}`,
+);
+
+/* ---- repetition across pages must not manufacture confidence ---- */
+
+// One weak rule (weight 4) on twelve pages used to sum to 48 and, with
+// pages >= 3, report "high". Confidence now comes from the strongest evidence
+// on a single page, so breadth can corroborate but never promote on its own.
+const weakHint = [{ id: "aem" as const, evidence: ["/content/dam"], score: 4 }];
+const weakEverywhere = aggregateStacks(
+  Array.from({ length: 12 }, () => ({ stackHints: weakHint })),
+);
+assert(
+  weakEverywhere.confidence === "low",
+  `a weak signal on 12 pages must stay low, got ${weakEverywhere.confidence}`,
+);
+assert(
+  !stackIsActionable(weakEverywhere),
+  "a weak signal repeated site-wide must not change the score",
+);
+
+// Strong evidence on a single page is medium; corroborated on two, high.
+const strongHint = [
+  { id: "aem" as const, evidence: ["/etc.clientlibs", "aem-Grid"], score: 11 },
+];
+const strongOnce = aggregateStacks([{ stackHints: strongHint }]);
+assert(
+  strongOnce.confidence === "medium",
+  `strong evidence on one page is medium, got ${strongOnce.confidence}`,
+);
+const strongTwice = aggregateStacks([
+  { stackHints: strongHint },
+  { stackHints: strongHint },
+]);
+assert(
+  strongTwice.confidence === "high",
+  `strong evidence corroborated is high, got ${strongTwice.confidence}`,
+);
+
 console.log("detect-stack fixtures ok");

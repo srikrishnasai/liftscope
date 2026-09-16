@@ -37,6 +37,25 @@ export function stackIsActionable(
   return stack?.confidence === "high" || stack?.confidence === "medium";
 }
 
+/**
+ * Match a `<meta name="generator">` tag whose content names a platform.
+ *
+ * Scoped to the tag rather than the whole document on purpose: the *name* of a
+ * CMS appearing in body copy says nothing about what the page runs on. A site
+ * about AEM, a blog post comparing Drupal to WordPress, or an agency listing
+ * the platforms it works with will all mention them on every page.
+ *
+ * Both attribute orders are accepted since either is valid HTML.
+ */
+function GENERATOR_RE(product: RegExp): RegExp {
+  const p = product.source;
+  return new RegExp(
+    `<meta[^>]*\\bname=["']generator["'][^>]*\\bcontent=["'][^"']*(?:${p})` +
+      `|<meta[^>]*\\bcontent=["'][^"']*(?:${p})[^"']*["'][^>]*\\bname=["']generator["']`,
+    "i",
+  );
+}
+
 interface Fingerprint {
   id: Exclude<CmsStackId, "unknown">;
   html: { re: RegExp; evidence: string; weight: number }[];
@@ -52,7 +71,15 @@ const FINGERPRINTS: Fingerprint[] = [
       { re: /\/content\/dam\//i, evidence: "/content/dam", weight: 4 },
       { re: /wcmmode|coral-ui|granite\/ui|granite\.utils/i, evidence: "AEM/Granite markers", weight: 5 },
       { re: /\baem-Grid\b|\baem-grid\b/i, evidence: "aem-Grid", weight: 5 },
-      { re: /adobe experience manager|adobe-aem/i, evidence: "AEM generator copy", weight: 5 },
+      // Must be an actual generator tag, not the phrase in body copy. A site
+      // *about* AEM (aeminsider.com: "Learn Adobe Experience Manager from the
+      // ground up") says the words on every page; that is not evidence of the
+      // platform it runs on. Both attribute orders, since either is valid HTML.
+      {
+        re: GENERATOR_RE(/adobe experience manager|adobe-aem|day communique/),
+        evidence: "generator=Adobe Experience Manager",
+        weight: 6,
+      },
     ],
     url: [{ re: /\/etc\.clientlibs\//i, evidence: "AEM path", weight: 3 }],
     header: [
@@ -296,7 +323,7 @@ export function aggregateStacks(
 ): StackDetection {
   const byId = new Map<
     CmsStackId,
-    { score: number; evidence: Set<string>; pages: number }
+    { score: number; best: number; evidence: Set<string>; pages: number }
   >();
 
   for (const page of pages) {
@@ -305,11 +332,16 @@ export function aggregateStacks(
       if (hint.id === "unknown") continue;
       const current = byId.get(hint.id) ?? {
         score: 0,
+        best: 0,
         evidence: new Set<string>(),
         pages: 0,
       };
+      const pageScore = hint.score ?? hint.evidence.length;
       hint.evidence.forEach((item) => current.evidence.add(item));
-      current.score += hint.score ?? hint.evidence.length;
+      current.score += pageScore;
+      // Strongest evidence seen on any single page — this, not the running
+      // total, decides confidence. See the note on `confidence` below.
+      current.best = Math.max(current.best, pageScore);
       if (!seen.has(hint.id)) {
         current.pages += 1;
         seen.add(hint.id);
@@ -334,11 +366,22 @@ export function aggregateStacks(
     });
 
   const primary = ranked[0] ?? null;
+  // Confidence comes from the strongest evidence on a *single* page, not from
+  // the total across pages.
+  //
+  // Summing let repetition manufacture certainty: one weak rule matching a
+  // site-wide headline or footer on 12 sampled pages reached "high" on its own.
+  // That is how aeminsider.com — a tutorial site whose hero reads "Learn Adobe
+  // Experience Manager from the ground up" — was reported as high-confidence
+  // AEM, which then fed the mismatch driver into the score. Corroboration
+  // across pages still helps, but it can only promote evidence that was already
+  // strong enough on its own merits.
+  const best = primary ? (byId.get(primary.id)?.best ?? 0) : 0;
   const confidence: StackDetection["confidence"] = !primary
     ? "none"
-    : primary.score >= HIGH || primary.pages >= 3
+    : best >= HIGH && primary.pages >= 2
       ? "high"
-      : primary.score >= MEDIUM
+      : best >= MEDIUM
         ? "medium"
         : "low";
 

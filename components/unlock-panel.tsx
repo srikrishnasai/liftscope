@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { isUnlockedLocal } from "@/lib/client-store";
 
-interface StripeConfig {
+interface PaymentConfig {
   configured: boolean;
   amount: number;
   currency: string;
@@ -22,7 +22,24 @@ interface StripeConfig {
   testMode: boolean;
 }
 
-type Gate = "open" | "login" | "pay";
+type Gate = "open" | "free" | "login" | "pay";
+
+const FALLBACK_CONFIG: PaymentConfig = {
+  configured: false,
+  amount: 149900,
+  currency: "INR",
+  formatted: "₹1,499",
+  testMode: false,
+};
+
+/** Parameters Razorpay appends to the callback URL on return. */
+const CALLBACK_PARAMS = [
+  "razorpay_payment_id",
+  "razorpay_payment_link_id",
+  "razorpay_payment_link_reference_id",
+  "razorpay_payment_link_status",
+  "razorpay_signature",
+] as const;
 
 export function UnlockPanel({
   reportId,
@@ -33,30 +50,23 @@ export function UnlockPanel({
   demo?: boolean;
   onUnlocked: () => void;
 }) {
-  const [config, setConfig] = useState<StripeConfig | null>(null);
+  const [config, setConfig] = useState<PaymentConfig | null>(null);
   const [gate, setGate] = useState<Gate | null>(null);
   const [pending, setPending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canceled, setCanceled] = useState(false);
+  const [freeSpentOn, setFreeSpentOn] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/stripe/config")
-      .then(async (response) => (await response.json()) as StripeConfig)
+    fetch("/api/razorpay/config")
+      .then(async (response) => (await response.json()) as PaymentConfig)
       .then((data) => {
         if (!cancelled) setConfig(data);
       })
       .catch(() => {
-        if (!cancelled) {
-          setConfig({
-            configured: false,
-            amount: 4900,
-            currency: "usd",
-            formatted: "$49",
-            testMode: false,
-          });
-        }
+        if (!cancelled) setConfig(FALLBACK_CONFIG);
       });
     return () => {
       cancelled = true;
@@ -68,19 +78,22 @@ export function UnlockPanel({
     if (params.get("checkout") === "canceled") {
       setCanceled(true);
     }
-    const sessionId = params.get("session_id");
-    if (!sessionId) {
+
+    const paymentId = params.get("razorpay_payment_id");
+    if (!paymentId) {
       fetch(`/api/reports/${encodeURIComponent(reportId)}/unlock`)
         .then(async (response) => {
           if (!response.ok) return { unlocked: false, gate: "open" as Gate };
           return (await response.json()) as {
             unlocked?: boolean;
             gate?: Gate;
+            freeSpentOn?: string;
           };
         })
         .then((data) => {
           const nextGate = data.gate ?? "open";
           setGate(nextGate);
+          setFreeSpentOn(data.freeSpentOn ?? null);
           if (data.unlocked) {
             onUnlocked();
             return;
@@ -93,10 +106,16 @@ export function UnlockPanel({
       return;
     }
 
+    // Hand every signed parameter back to the server; it re-derives the
+    // signature and then re-fetches the link from Razorpay before unlocking.
+    const query = new URLSearchParams({ reportId });
+    for (const key of CALLBACK_PARAMS) {
+      const value = params.get(key);
+      if (value) query.set(key, value);
+    }
+
     setVerifying(true);
-    fetch(
-      `/api/stripe/session?session_id=${encodeURIComponent(sessionId)}&reportId=${encodeURIComponent(reportId)}`,
-    )
+    fetch(`/api/razorpay/callback?${query.toString()}`)
       .then(async (response) => {
         const data = (await response.json()) as {
           paid?: boolean;
@@ -113,7 +132,7 @@ export function UnlockPanel({
       .then(() => {
         onUnlocked();
         const url = new URL(window.location.href);
-        url.searchParams.delete("session_id");
+        for (const key of CALLBACK_PARAMS) url.searchParams.delete(key);
         url.searchParams.delete("checkout");
         window.history.replaceState({}, "", url.pathname);
       })
@@ -123,12 +142,38 @@ export function UnlockPanel({
       .finally(() => setVerifying(false));
   }, [reportId, onUnlocked]);
 
+  async function claimFree() {
+    setError(null);
+    setPending(true);
+    try {
+      const response = await fetch(
+        `/api/reports/${encodeURIComponent(reportId)}/claim-free`,
+        { method: "POST" },
+      );
+      const data = (await response.json()) as {
+        unlocked?: boolean;
+        error?: string;
+        freeSpentOn?: string;
+      };
+      if (!response.ok || !data.unlocked) {
+        if (data.freeSpentOn) setFreeSpentOn(data.freeSpentOn);
+        setGate("pay");
+        throw new Error(data.error || "Could not unlock this report");
+      }
+      onUnlocked();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not unlock this report");
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function startCheckout() {
     setError(null);
     setCanceled(false);
     setPending(true);
     try {
-      const response = await fetch("/api/stripe/checkout", {
+      const response = await fetch("/api/razorpay/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reportId }),
@@ -139,24 +184,25 @@ export function UnlockPanel({
       };
       if (response.status === 401) {
         setGate("login");
-        throw new Error(data.error || "Sign in before starting Checkout.");
+        throw new Error(data.error || "Sign in before paying.");
       }
       if (!response.ok || !data.url) {
-        throw new Error(data.error || "Could not start Stripe Checkout");
+        throw new Error(data.error || "Could not start the payment");
       }
       window.location.href = data.url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start Stripe Checkout");
+      setError(err instanceof Error ? err.message : "Could not start the payment");
       setPending(false);
     }
   }
 
-  const stripeReady = Boolean(config?.configured);
+  const paymentsReady = Boolean(config?.configured);
   const loginHref = `/login?next=${encodeURIComponent(`/report/${reportId}`)}`;
   const signupHref = `/signup?next=${encodeURIComponent(`/report/${reportId}`)}`;
-  const showLogin = stripeReady && !demo && gate === "login";
-  const showPay = stripeReady && !demo && gate === "pay";
-  const showDemo = demo || !stripeReady;
+  const showFree = paymentsReady && !demo && gate === "free";
+  const showLogin = paymentsReady && !demo && gate === "login";
+  const showPay = paymentsReady && !demo && gate === "pay";
+  const showDemo = demo || !paymentsReady;
 
   return (
     <Card className="no-print border-primary/20">
@@ -167,18 +213,18 @@ export function UnlockPanel({
         </CardTitle>
         <CardDescription>
           Reveals the remaining risks, phased plan, client memo, and the
-          checklist of what would move this estimate. Paid unlocks require an
-          account so the purchase stays with you.
+          checklist of what would move this estimate. Your first report is
+          free and complete — after that, unlocking one is a paid upgrade.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {canceled && (
           <Alert>
             <AlertCircle />
-            <AlertTitle>Checkout canceled</AlertTitle>
+            <AlertTitle>Payment canceled</AlertTitle>
             <AlertDescription>
-              No charge was made. Start Checkout again when you want the full
-              working papers.
+              No charge was made. Start again when you want the full working
+              papers.
             </AlertDescription>
           </Alert>
         )}
@@ -192,18 +238,42 @@ export function UnlockPanel({
         {verifying && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            Confirming payment with Stripe…
+            Confirming payment with Razorpay…
           </p>
         )}
-        {stripeReady && !demo && gate === null && !verifying && (
+        {paymentsReady && !demo && gate === null && !verifying && (
           <p className="text-sm text-muted-foreground">Checking account…</p>
+        )}
+
+        {showFree && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Your first report is on us — the whole thing, no card and no
+              account. Read the full risk register and plan before you decide
+              whether this is worth paying for.
+            </p>
+            <Button
+              type="button"
+              size="lg"
+              disabled={pending || verifying}
+              onClick={claimFree}
+            >
+              {pending && <Loader2 className="animate-spin" />}
+              Unlock this report free
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              One free report per person. Later reports are{" "}
+              {config?.formatted ?? FALLBACK_CONFIG.formatted} each.
+            </p>
+          </div>
         )}
 
         {showLogin && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Sign in first. Checkout and the paid report attach to your
-              account, not just this browser.
+              {freeSpentOn
+                ? "You have already used your free report. Sign in to unlock this one — the payment and the report attach to your account, not just this browser."
+                : "Sign in first. The payment and the paid report attach to your account, not just this browser."}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Link
@@ -232,37 +302,43 @@ export function UnlockPanel({
             >
               {(pending || verifying) && <Loader2 className="animate-spin" />}
               {pending
-                ? "Redirecting to Stripe…"
-                : `Unlock with Stripe — ${config?.formatted ?? "$49"}`}
+                ? "Redirecting to Razorpay…"
+                : `Unlock — ${config?.formatted ?? FALLBACK_CONFIG.formatted}`}
             </Button>
             <p className="text-xs text-muted-foreground">
-              One-time payment for this report, stored on your account.{" "}
+              {freeSpentOn ? "Free report already used. " : ""}One-time payment
+              for this report, stored on your account. UPI,
+              cards, net banking, and wallets on Razorpay&rsquo;s hosted page.{" "}
               {config?.testMode
-                ? "Stripe is in test mode — use card 4242 4242 4242 4242."
-                : "You will be charged on Stripe-hosted Checkout."}
+                ? "Razorpay is in test mode — no real money moves."
+                : ""}
             </p>
           </div>
         )}
 
         {showDemo && (
           <div className="space-y-3">
-            {demo && stripeReady && (
+            {demo && paymentsReady && (
               <p className="text-sm text-muted-foreground">
                 Sample fixture — no charge and no account required. Live
-                estimates require sign-in, then Stripe Checkout.
+                estimates require sign-in, then payment.
               </p>
             )}
-            {!stripeReady && (
+            {!paymentsReady && (
               <p className="text-xs text-muted-foreground">
-                Stripe is not configured on this instance. Set{" "}
-                <code className="rounded bg-muted px-1">STRIPE_SECRET_KEY</code>{" "}
+                Razorpay is not configured on this instance. Set{" "}
+                <code className="rounded bg-muted px-1">RAZORPAY_KEY_ID</code>{" "}
+                and{" "}
+                <code className="rounded bg-muted px-1">
+                  RAZORPAY_KEY_SECRET
+                </code>{" "}
                 to take real payments. Until then, unlock is free for review.
               </p>
             )}
             <Button
               type="button"
               size="lg"
-              variant={stripeReady && demo ? "outline" : "default"}
+              variant={paymentsReady && demo ? "outline" : "default"}
               disabled={verifying}
               onClick={onUnlocked}
             >
