@@ -84,10 +84,21 @@ function scaleEffort(
   multiplier: number,
 ): EstimateReport["effort"] {
   if (multiplier === 1) return effort;
+  // No ceiling. v0.1 clamped `high` at 120 person-weeks here as well as in
+  // effortFromScore, which silently truncated any large estate — the
+  // calibration project alone was 212. Tighten answers scale every bucket
+  // proportionally, since they describe the programme, not one workstream.
   const low = Math.max(3, Math.round(effort.low * multiplier));
   const mid = Math.max(low + 2, Math.round(effort.mid * multiplier));
-  const high = Math.min(120, Math.round(effort.high * multiplier));
-  return { low, mid, high };
+  return {
+    low,
+    mid,
+    high: Math.round(effort.high * multiplier),
+    code: Number((effort.code * multiplier).toFixed(1)),
+    content: Number((effort.content * multiplier).toFixed(1)),
+    overhead: Number((effort.overhead * multiplier).toFixed(1)),
+    fromBpa: effort.fromBpa,
+  };
 }
 
 function mergeRisks(base: Risk[], extra: Risk[]): Risk[] {

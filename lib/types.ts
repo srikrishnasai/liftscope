@@ -97,6 +97,10 @@ export interface EstimateInput {
   siteCount: number;
   languageCount: number;
   customComponentCount: number;
+  /** Code repositories in scope. Drives content-migration (CTT) effort. */
+  repoCount?: number;
+  /** BPA remediation points, when a Best Practices Analyzer report was parsed. */
+  bpaPoints?: number;
   demo?: boolean;
 }
 
@@ -121,6 +125,18 @@ export interface EffortBand {
   low: number;
   mid: number;
   high: number;
+}
+
+/** Effort split by bucket. See the calibration note in `lib/scoring.ts`. */
+export interface EffortBreakdown extends EffortBand {
+  /** Code refactoring person-weeks. */
+  code: number;
+  /** Content migration (CTT, validation, top-ups) person-weeks. */
+  content: number;
+  /** Env setup, testing, cutover, hypercare, PM. */
+  overhead: number;
+  /** True when `code` came from BPA points rather than the complexity curve. */
+  fromBpa: boolean;
 }
 
 export interface Risk {
@@ -200,7 +216,7 @@ export interface EstimateReport {
     drivers: ScoreDriver[];
     narrative: string;
   };
-  effort: EffortBand;
+  effort: EffortBreakdown;
   risks: Risk[];
   plan: PlanPhase[];
   assumptions: string[];

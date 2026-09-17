@@ -4,6 +4,30 @@ Shipped slices of LiftScope, newest first. For current invariants and file map, 
 
 ## Unreleased
 
+### Effort model v0.2 — calibrated against a real migration
+
+v0.1 was **~8x low**. On a delivered AMS -> AEMaaCS programme (AEM 6.5.21, 7 repositories, ~10 sites, 4,761 BPA findings, 7 people over 7 months = ~212 person-weeks) it predicted **26 person-weeks**. It also hard-capped `high` at 120 in *two* places — `effortFromScore` and `scaleEffort` — so the tool could not express that project at any input at all. The second cap would have silently re-clamped the band even after the first was removed.
+
+Effort is now three buckets, because they are driven by different things:
+
+```
+total = (code + content) x 1.43
+```
+
+- **code** — from BPA remediation points when a report is supplied, otherwise from **custom component count**
+- **content** — CTT runs, validation, top-ups. Scales with **repositories and sites**, not page count: CTT effort is cycles per repository
+- **x1.43** — environments, testing, cutover, hypercare, PM
+
+**Code effort no longer reads the complexity score.** That score blends page inventory, form density and integration signals — content and scope proxies. The calibration estate scores complexity **5** while costing 212 person-weeks. Size and difficulty are different questions and conflating them was a large part of why v0.1 was so far out.
+
+`repoCount` is a new first-class input, surfaced in the estimate form, because content migration was the single largest bucket (~40%) and nothing in a crawl or a BPA report can see it.
+
+The report now shows the bucket split, and says plainly that the model is calibrated against one project — which is honest, and invites the corrections that produce a second data point.
+
+Bands are deliberately wide (0.6x to 1.75x). One calibration point gives a central estimate and no error distribution; a narrow band would be fabricated precision.
+
+Regression: `npm run test:effort` (25 fixtures) asserts the known actual falls inside the band, that both input paths agree, that the 30/40/30 split holds, that no ceiling exists, and that complexity alone does not move effort.
+
 ### Stack detection: a CMS named in page copy is no longer a detection
 
 Reported against `aeminsider.com`, which came back as **high-confidence Adobe Experience Manager**. It is hand-written static HTML on Netlify — no CMS at all. Two causes, compounding:

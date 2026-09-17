@@ -238,6 +238,48 @@ export function ReportView({ report }: { report: EstimateReport }) {
             hint="Integrations and content overrun"
           />
         </div>
+
+        <div className="rounded-xl border bg-card p-4 ring-1 ring-foreground/5">
+          <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">
+            Where the mid case goes
+          </p>
+          <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+            <EffortSplit
+              label="Code refactoring"
+              weeks={view.effort.code}
+              total={view.effort.mid}
+              hint={
+                view.effort.fromBpa
+                  ? "From BPA remediation findings"
+                  : "From the complexity rubric"
+              }
+            />
+            <EffortSplit
+              label="Content migration"
+              weeks={view.effort.content}
+              total={view.effort.mid}
+              hint="CTT cycles per repository, validation, top-ups"
+            />
+            <EffortSplit
+              label="Everything else"
+              weeks={view.effort.overhead}
+              total={view.effort.mid}
+              hint="Environments, testing, cutover, hypercare, PM"
+            />
+          </dl>
+        </div>
+
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          <strong className="font-medium text-foreground">
+            Effort model v0.2, calibrated against one delivered migration.
+          </strong>{" "}
+          A 7-repository AEM 6.5 estate on AMS that took roughly 212
+          person-weeks, split about 30% code, 40% content migration, 30%
+          everything else. That grounds the structure and the rough shape — it
+          does not give this a margin of error. Treat the band as a planning
+          range, and tell us what your migration actually took so the next
+          estimate is better.
+        </p>
       </section>
 
       <AssumptionOverridesPanel
@@ -567,6 +609,32 @@ function ScoreRing({ score }: { score: number }) {
       <p className="mt-1 text-xs tracking-[0.14em] text-muted-foreground uppercase">
         Complexity / 10
       </p>
+    </div>
+  );
+}
+
+function EffortSplit({
+  label,
+  weeks,
+  total,
+  hint,
+}: {
+  label: string;
+  weeks: number;
+  total: number;
+  hint: string;
+}) {
+  const share = total > 0 ? Math.round((weeks / total) * 100) : 0;
+  return (
+    <div>
+      <dt className="text-sm font-medium">{label}</dt>
+      <dd className="mt-1 text-sm text-muted-foreground">
+        <span className="font-heading text-lg text-foreground">
+          {Math.round(weeks)}
+        </span>{" "}
+        person-weeks · {share}%
+        <span className="mt-1 block text-xs">{hint}</span>
+      </dd>
     </div>
   );
 }

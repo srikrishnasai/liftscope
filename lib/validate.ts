@@ -50,6 +50,7 @@ export function parseEstimateRequest(body: unknown): EstimateInput {
     siteCount: Number(raw.siteCount),
     languageCount: Number(raw.languageCount),
     customComponentCount: Number(raw.customComponentCount),
+    repoCount: Number(raw.repoCount),
     sitemapUrl: typeof raw.sitemapUrl === "string" ? raw.sitemapUrl : undefined,
     sitemapXml: typeof raw.sitemapXml === "string" ? raw.sitemapXml : undefined,
     samplePageUrls: Array.isArray(raw.samplePageUrls)

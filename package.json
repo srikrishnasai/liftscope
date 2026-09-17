@@ -12,7 +12,8 @@
     "test:sitemap": "node --experimental-strip-types lib/sitemap-fixtures.ts",
     "test:store": "node --experimental-strip-types lib/store-fixtures.ts",
     "test:razorpay": "node --experimental-strip-types lib/razorpay-fixtures.ts",
-    "test:entitlements": "node --experimental-strip-types lib/entitlement-fixtures.ts"
+    "test:entitlements": "node --experimental-strip-types lib/entitlement-fixtures.ts",
+    "test:effort": "node --experimental-strip-types lib/effort-fixtures.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

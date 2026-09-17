@@ -36,6 +36,7 @@ export function EstimateForm() {
   const [siteCount, setSiteCount] = useState("1");
   const [languageCount, setLanguageCount] = useState("1");
   const [customComponentCount, setCustomComponentCount] = useState("12");
+  const [repoCount, setRepoCount] = useState("1");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"form" | "demo" | null>(null);
 
@@ -65,6 +66,7 @@ export function EstimateForm() {
             siteCount: Number(siteCount),
             languageCount: Number(languageCount),
             customComponentCount: Number(customComponentCount),
+            repoCount: Number(repoCount),
           };
 
       const response = await fetch("/api/analyze", {
@@ -186,7 +188,7 @@ export function EstimateForm() {
               ))}
             </select>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <NumberField
               id="sites"
               label="Number of sites"
@@ -208,7 +210,20 @@ export function EstimateForm() {
               min={0}
               onChange={setCustomComponentCount}
             />
+            <NumberField
+              id="repos"
+              label="Code repositories"
+              value={repoCount}
+              min={1}
+              onChange={setRepoCount}
+            />
           </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Repositories drive the content-migration estimate: Content Transfer
+            Tool effort is cycles per repository, not pages. On a calibration
+            project, content migration was the single largest cost at roughly
+            40% of total effort.
+          </p>
         </CardContent>
       </Card>
 

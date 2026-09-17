@@ -102,6 +102,7 @@ function normalizeInput(raw: EstimateInput): EstimateInput {
       0,
       Math.min(2000, Math.round(Number(raw.customComponentCount) || 0)),
     ),
+    repoCount: Math.max(1, Math.min(100, Math.round(Number(raw.repoCount) || 1))),
   };
 }
 

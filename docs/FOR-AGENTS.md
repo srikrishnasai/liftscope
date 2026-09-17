@@ -39,7 +39,10 @@ Stack: Next.js 16 App Router (TypeScript), Tailwind 4, shadcn/ui. Dev: `npm run 
 14. **Format numbers with `formatCount`** (`lib/format.ts`), never bare `toLocaleString()` — that follows the *server's* locale, so an en-IN host renders `8,75,000` and client/server can disagree during hydration. The one deliberate exception is `formatUnlockPrice` in `lib/razorpay.ts`, which pins **en-IN** because INR is conventionally grouped that way (₹1,20,000). Do not "fix" it to en-US.
 15. **Razorpay uses two different secrets.** `RAZORPAY_KEY_SECRET` signs API auth and the payment **callback**; `RAZORPAY_WEBHOOK_SECRET` signs the **webhook body**. They are not interchangeable and `test:razorpay` asserts that one does not verify the other.
 16. **A valid signature never unlocks a report on its own.** The callback route re-fetches the payment link from Razorpay and reads `notes.reportId` / `notes.userId` and the paid status from *that*. The signature proves the query string was not tampered with; it says nothing about who the payment was for, and `notes` is not part of the signed payload. `npm run test:razorpay` is the regression check.
-17. **The free claim is keyed by every identity the caller presents** — the signed `liftscope_visitor` cookie *and* the account when signed in — and all of them are checked. Keying on only one lets someone farm free reports by signing up after claiming anonymously, or by clearing cookies while signed in. Someone can still get another by clearing cookies in a private window; that is accepted leakage on a top-of-funnel giveaway, not a bug to "fix" by demanding signup.
+17. **Effort is calibrated, not invented — and never capped.** `effortFromScore` splits effort into **code + content + overhead** and is fitted to one delivered migration (see the provenance block in `lib/scoring.ts`). v0.1 blended it into one complexity curve, was **~8x low** on that project, and clamped `high` at 120 person-weeks in *two* places, so the tool could not express a 212-person-week programme at any input. Do not reintroduce a ceiling anywhere, and do not tune the constants without a new delivered project with known actuals. `npm run test:effort` is the regression check.
+18. **Complexity is not effort.** The complexity score blends page inventory, form density and integration signals — content and scope proxies. Effort follows *size*: custom component count, repositories, sites, or BPA remediation points. The calibration estate scores complexity **5** while costing 212 person-weeks; a big-but-straightforward migration is exactly that. `effortFromScore` deliberately ignores the score, and a fixture asserts it.
+19. **Content migration is the largest bucket and no crawl can see it.** On the calibration project it was ~40% of total effort — Content Transfer Tool cycles, validation and top-ups — against 30% code. CTT effort scales with **repositories x cycles**, not page count, which is why `repoCount` is a first-class input.
+20. **The free claim is keyed by every identity the caller presents** — the signed `liftscope_visitor` cookie *and* the account when signed in — and all of them are checked. Keying on only one lets someone farm free reports by signing up after claiming anonymously, or by clearing cookies while signed in. Someone can still get another by clearing cookies in a private window; that is accepted leakage on a top-of-funnel giveaway, not a bug to "fix" by demanding signup.
 
 ## Product loop
 
@@ -53,7 +56,8 @@ Stack: Next.js 16 App Router (TypeScript), Tailwind 4, shadcn/ui. Dev: `npm run 
 | Concern | Path |
 | --- | --- |
 | Types | `lib/types.ts` |
-| Rubric, effort bands | `lib/scoring.ts` |
+| Rubric, effort model (calibrated) | `lib/scoring.ts` |
+| Effort fixtures | `lib/effort-fixtures.ts` (`npm run test:effort`) |
 | Risks | `lib/risks.ts` |
 | Plan / narrative / assumptions | `lib/plan.ts`, `lib/narrative.ts` |
 | Assemble report | `lib/assemble.ts` |
@@ -123,6 +127,7 @@ npm run test:sitemap # index vs urlset, counts, extrapolation
 npm run test:store   # durability across cold starts, legacy migration
 npm run test:razorpay # payment + webhook signature verification
 npm run test:entitlements # one free report per visitor, anti-farming
+npm run test:effort  # effort model vs the one known actual; no caps
 npm run build        # typecheck + Next production build
 npm run lint
 ```

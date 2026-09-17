@@ -1,13 +1,13 @@
 import type {
   CrawlSummary,
-  EffortBand,
+  EffortBreakdown,
   EstimateInput,
   ScoreDriver,
   SitemapSummary,
-} from "./types";
-import { TARGET_LABELS } from "./types";
-import { isFrontendStack, stackAlignment, stackIsActionable } from "./detect-stack";
-import { formatCount } from "./format";
+} from "./types.ts";
+import { TARGET_LABELS } from "./types.ts";
+import { isFrontendStack, stackAlignment, stackIsActionable } from "./detect-stack.ts";
+import { formatCount } from "./format.ts";
 
 export const RUBRIC_VERSION = "1.0";
 
@@ -198,16 +198,118 @@ export function scoreEstimate(
   };
 }
 
+/**
+ * Effort model v0.2 — calibrated against ONE delivered migration.
+ *
+ * v0.1 blended everything into a single complexity curve and was **~8x low**
+ * on a real AMS -> AEMaaCS programme (predicted 26 person-weeks, actual 212),
+ * with `high` hard-capped at 120 so the tool could not express the project at
+ * any input. The cap is gone and the curve is split three ways, because the
+ * buckets are driven by different things:
+ *
+ *   code     - refactoring. Scales with complexity, or directly with BPA
+ *              remediation points when a Best Practices Analyzer report
+ *              was supplied.
+ *   content  - migration itself (Content Transfer Tool runs, validation,
+ *              top-ups, assets). Scales with **repositories and sites**, not
+ *              with page count: CTT effort is cycles-per-repository, and each
+ *              cycle needs babysitting and re-validation.
+ *   overhead - environment/Cloud Manager setup, testing, cutover, hypercare,
+ *              project management. Applied as an uplift on delivery work.
+ *
+ *   total = (code + content) * (1 + OVERHEAD)
+ *
+ * CALIBRATION PROVENANCE — read before changing any constant.
+ * One project: AEM 6.5.21 on AMS, 7 repositories, ~10 sites, 4,761 BPA
+ * findings, delivered by 7 people over 7 months (~212 person-weeks), split
+ * roughly 30% code / 40% content / 30% everything else.
+ *
+ * What that grounds: the three-part structure, the ~0.43 overhead uplift, and
+ * the totals for each bucket on an estate of that shape.
+ *
+ * What it does NOT ground: the split of `content` between the per-repository
+ * and per-site terms (only their sum is observed), the locale term (that
+ * project's locale count is unknown, so the term is zero at one locale by
+ * construction), or whether a 40% content share generalises at all — that
+ * estate had 7 repositories, which is a lot. A single-repository customer will
+ * very likely sit lower.
+ *
+ * Do not tune these constants on a hunch. Add a second delivered project with
+ * known actuals and re-fit.
+ */
+
+/**
+ * Code refactoring, when no BPA report is available.
+ *
+ * Driven by **custom component count**, not by the complexity score. The
+ * complexity rubric blends page inventory, form density and integration
+ * signals — those are content and scope proxies, and a large estate can score
+ * mid-range on it while carrying an enormous codebase. The calibration project
+ * is exactly that case: 530 custom components and 7 repositories, but
+ * complexity 5 when no sitemap is supplied.
+ *
+ * Size and complexity are different questions. Effort follows size.
+ */
+const CODE_BASE = 6;
+const CODE_PER_COMPONENT = 0.11;
+/** Person-weeks per BPA remediation point, when a BPA report was supplied. */
+export const BPA_POINT_WEEKS = 0.33;
+/** Content migration: CTT setup and cycles are per repository. */
+const CONTENT_PER_REPO = 6;
+/** Plus per-site validation, cutover and regression. */
+const CONTENT_PER_SITE = 4.3;
+/** Extra locales add language copies and translation QA. Zero at one locale. */
+const CONTENT_PER_EXTRA_LOCALE = 2;
+/** Env setup, testing, cutover, hypercare, PM, as an uplift on delivery work. */
+const OVERHEAD = 0.43;
+
+/**
+ * Band spread. Deliberately wide: one calibration point gives a central
+ * estimate and no error distribution at all, so a narrow band would be a
+ * fabricated precision. Present this as a planning range, never as a bid.
+ */
+const BAND_LOW = 0.6;
+const BAND_HIGH = 1.75;
+
 export function effortFromScore(
-  score: number,
+  /**
+   * Retained for the signature and for future use, but the code term no
+   * longer reads it — see the CODE_BASE note. Size drives effort; complexity
+   * describes difficulty. A big-but-straightforward estate is a lot of work
+   * at a middling complexity score, and the two should not be conflated.
+   */
+  _score: number,
   input: EstimateInput,
-): EffortBand {
+): EffortBreakdown {
   const sites = Math.max(1, input.siteCount);
   const langs = Math.max(1, input.languageCount);
-  const scale =
-    1 + Math.max(0, sites - 1) * 0.12 + Math.max(0, langs - 1) * 0.08;
-  const low = Math.round((2 + score * 1.4) * scale);
-  const mid = Math.round((3.5 + score * 2.3) * scale);
-  const high = Math.min(120, Math.round((5.5 + score * 3.5) * scale));
-  return { low: Math.max(3, low), mid: Math.max(low + 2, mid), high };
+  const repos = Math.max(1, input.repoCount ?? 1);
+
+  const components = Math.max(0, input.customComponentCount || 0);
+  const fromBpa =
+    typeof input.bpaPoints === "number" && Number.isFinite(input.bpaPoints);
+  const code = fromBpa
+    ? Math.max(0, input.bpaPoints as number) * BPA_POINT_WEEKS
+    : CODE_BASE + components * CODE_PER_COMPONENT;
+
+  const content =
+    repos * CONTENT_PER_REPO +
+    sites * CONTENT_PER_SITE +
+    Math.max(0, langs - 1) * CONTENT_PER_EXTRA_LOCALE;
+
+  const delivery = code + content;
+  const overhead = delivery * OVERHEAD;
+  const mid = delivery + overhead;
+
+  const low = Math.round(mid * BAND_LOW);
+  return {
+    low: Math.max(3, low),
+    mid: Math.max(low + 2, Math.round(mid)),
+    high: Math.round(mid * BAND_HIGH),
+    code: Number(code.toFixed(1)),
+    content: Number(content.toFixed(1)),
+    overhead: Number(overhead.toFixed(1)),
+    fromBpa,
+  };
 }
+
